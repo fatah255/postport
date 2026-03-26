@@ -202,12 +202,21 @@ export class MediaService {
       orderBy: this.mapSort(input.sort)
     });
 
-    return {
-      items: items.map((item) => ({
+    const serializedItems = await Promise.all(
+      items.map(async (item) => ({
         ...this.serializeMediaAsset(item),
-        thumbnail: item.thumbnails[0] ? this.storageService.publicUrlForObject(item.thumbnails[0].storageKey) : null,
+        thumbnail: item.thumbnails[0]
+          ? await this.storageService.createSignedDownloadUrl(item.thumbnails[0].storageKey)
+          : null,
+        previewUrl: this.canPreviewOriginalUpload(item.status)
+          ? await this.storageService.createSignedDownloadUrl(item.storageKey)
+          : null,
         usageCount: item._count.draftSelections
       }))
+    );
+
+    return {
+      items: serializedItems
     };
   }
 
@@ -233,17 +242,28 @@ export class MediaService {
       throw new NotFoundException("Media asset not found.");
     }
 
+    const [variants, thumbnails, sourceUrl] = await Promise.all([
+      Promise.all(
+        item.variants.map(async (variant) => ({
+          ...variant,
+          sizeBytes: Number(variant.sizeBytes),
+          publicUrl: await this.storageService.createSignedDownloadUrl(variant.storageKey)
+        }))
+      ),
+      Promise.all(
+        item.thumbnails.map(async (thumbnail) => ({
+          ...thumbnail,
+          publicUrl: await this.storageService.createSignedDownloadUrl(thumbnail.storageKey)
+        }))
+      ),
+      this.canPreviewOriginalUpload(item.status) ? this.storageService.createSignedDownloadUrl(item.storageKey) : Promise.resolve(null)
+    ]);
+
     return {
       ...this.serializeMediaAsset(item),
-      variants: item.variants.map((variant) => ({
-        ...variant,
-        sizeBytes: Number(variant.sizeBytes),
-        publicUrl: this.storageService.publicUrlForObject(variant.storageKey)
-      })),
-      thumbnails: item.thumbnails.map((thumbnail) => ({
-        ...thumbnail,
-        publicUrl: this.storageService.publicUrlForObject(thumbnail.storageKey)
-      })),
+      sourceUrl,
+      variants,
+      thumbnails,
       tags: item.tags.map((tagRef) => tagRef.mediaTag)
     };
   }
@@ -398,6 +418,10 @@ export class MediaService {
       default:
         return { createdAt: "desc" as const };
     }
+  }
+
+  private canPreviewOriginalUpload(status: MediaStatus) {
+    return status !== MediaStatus.UPLOADING && status !== MediaStatus.DELETED;
   }
 
   private serializeMediaAsset<T extends { sizeBytes: bigint }>(mediaAsset: T) {

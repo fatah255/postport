@@ -3,6 +3,7 @@ import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
+  GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -117,6 +118,19 @@ export class StorageService {
   publicUrlForObject(objectKey: string): string {
     const trimmedEndpoint = env.S3_ENDPOINT.replace(/\/+$/, "");
     return `${trimmedEndpoint}/${env.S3_BUCKET}/${objectKey}`;
+  }
+
+  async createSignedDownloadUrl(objectKey: string, expiresInSeconds = env.SIGNED_MEDIA_URL_EXPIRY_SECONDS) {
+    return getSignedUrl(
+      this.s3,
+      new GetObjectCommand({
+        Bucket: env.S3_BUCKET,
+        Key: objectKey
+      }),
+      {
+        expiresIn: expiresInSeconds
+      }
+    );
   }
 
   async objectExists(objectKey: string) {

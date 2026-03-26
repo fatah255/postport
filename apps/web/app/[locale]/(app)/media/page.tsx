@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, CardDescription, CardTitle, Input } from "@postport/ui";
 import { ApiError, apiRequest } from "@/lib/api-client";
 
@@ -22,6 +22,7 @@ interface MediaItem {
   durationMs: number | null;
   createdAt: string;
   thumbnail: string | null;
+  previewUrl: string | null;
   usageCount: number;
 }
 
@@ -75,6 +76,7 @@ interface MediaPreviewDetails {
   width: number | null;
   height: number | null;
   durationMs: number | null;
+  sourceUrl: string | null;
   variants: MediaVariant[];
   thumbnails: Array<{
     id: string;
@@ -350,12 +352,46 @@ export default function MediaPage() {
       return null;
     }
 
+    if (preview.mediaType === "VIDEO") {
+      return (
+        preview.variants.find((variant) => variant.variantKind === "normalized")?.publicUrl ??
+        preview.variants.find((variant) => variant.variantKind === "original")?.publicUrl ??
+        preview.sourceUrl ??
+        preview.thumbnails[0]?.publicUrl ??
+        null
+      );
+    }
+
     return (
-      preview.variants.find((variant) => variant.variantKind === "normalized")?.publicUrl ??
       preview.variants.find((variant) => variant.variantKind === "original")?.publicUrl ??
+      preview.sourceUrl ??
       preview.thumbnails[0]?.publicUrl ??
       null
     );
+  }, [preview]);
+
+  const previewFiles = useMemo(() => {
+    if (!preview) {
+      return [];
+    }
+
+    const sourceFile = preview.sourceUrl
+      ? [
+          {
+            id: `${preview.id}-source`,
+            label: `source upload - ${preview.mimeType}`,
+            url: preview.sourceUrl
+          }
+        ]
+      : [];
+
+    const variants = preview.variants.map((variant) => ({
+      id: variant.id,
+      label: `${variant.variantKind} - ${variant.mimeType}`,
+      url: variant.publicUrl
+    }));
+
+    return [...sourceFile, ...variants];
   }, [preview]);
 
   return (
@@ -543,19 +579,9 @@ export default function MediaPage() {
                       className="h-4 w-4"
                     />
                   </label>
-                  {item.thumbnail ? (
-                    <button type="button" className="w-full text-left" onClick={() => void openPreview(item.id)}>
-                      <img src={item.thumbnail} alt={item.originalFilename} className="h-44 w-full rounded-xl object-cover" />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="flex h-44 w-full items-center justify-center rounded-xl bg-slate-100 text-xs text-slate-500 dark:bg-slate-800"
-                      onClick={() => void openPreview(item.id)}
-                    >
-                      No thumbnail
-                    </button>
-                  )}
+                  <button type="button" className="w-full text-left" onClick={() => void openPreview(item.id)}>
+                    <MediaCardArtwork item={item} />
+                  </button>
                 </div>
 
                 <div>
@@ -679,20 +705,33 @@ export default function MediaPage() {
                 <div className="space-y-4">
                   {previewUrl ? (
                     preview.mediaType === "VIDEO" ? (
-                      <video src={previewUrl} controls className="max-h-[420px] w-full rounded-2xl bg-slate-950" />
+                      <video
+                        src={previewUrl}
+                        controls
+                        poster={preview.thumbnails[0]?.publicUrl}
+                        className="max-h-[420px] w-full rounded-2xl bg-slate-950"
+                      />
                     ) : (
                       <img src={previewUrl} alt={preview.originalFilename} className="max-h-[420px] w-full rounded-2xl object-contain bg-slate-100 dark:bg-slate-950" />
                     )
                   ) : (
                     <div className="flex h-72 items-center justify-center rounded-2xl bg-slate-100 text-sm text-slate-500 dark:bg-slate-950">
-                      No preview available yet.
+                      {preview.status === "PROCESSING"
+                        ? "Processing is still running. The source file will appear here as soon as it is available."
+                        : "No preview available yet."}
                     </div>
                   )}
+
+                  {preview.status === "PROCESSING" ? (
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      Processing is still running. If thumbnails do not appear after a refresh, use Reprocess from the library card.
+                    </p>
+                  ) : null}
 
                   {preview.thumbnails.length > 0 ? (
                     <div className="grid gap-3 sm:grid-cols-3">
                       {preview.thumbnails.map((thumbnail) => (
-                        <img
+                        <MediaImage
                           key={thumbnail.id}
                           src={thumbnail.publicUrl}
                           alt={`${preview.originalFilename} thumbnail`}
@@ -715,18 +754,18 @@ export default function MediaPage() {
 
                   <div className="space-y-2">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Available files</p>
-                    {preview.variants.length === 0 ? (
+                    {previewFiles.length === 0 ? (
                       <CardDescription>No variants available yet.</CardDescription>
                     ) : (
-                      preview.variants.map((variant) => (
+                      previewFiles.map((file) => (
                         <a
-                          key={variant.id}
-                          href={variant.publicUrl}
+                          key={file.id}
+                          href={file.url}
                           target="_blank"
                           rel="noreferrer"
                           className="block rounded-2xl border border-slate-200 p-3 text-sm text-slate-700 hover:border-sky-300 hover:text-sky-700 dark:border-slate-800 dark:text-slate-200 dark:hover:border-sky-700 dark:hover:text-sky-300"
                         >
-                          {variant.variantKind} - {variant.mimeType}
+                          {file.label}
                         </a>
                       ))
                     )}
@@ -848,6 +887,86 @@ async function uploadMultipartFile(file: File) {
   }
 
   return init.duplicateHint;
+}
+
+function MediaCardArtwork({ item }: { item: MediaItem }) {
+  const imageFallback = item.mediaType === "IMAGE" ? item.previewUrl : null;
+  const primarySrc = item.thumbnail ?? imageFallback;
+
+  if (!primarySrc) {
+    return <MediaArtworkPlaceholder item={item} />;
+  }
+
+  return (
+    <div className="relative">
+      <MediaImage
+        src={primarySrc}
+        fallbackSrc={item.thumbnail ? imageFallback : null}
+        alt={item.originalFilename}
+        className="h-44 w-full rounded-xl object-cover"
+        fallback={<MediaArtworkPlaceholder item={item} />}
+      />
+      <MediaArtworkBadge item={item} />
+    </div>
+  );
+}
+
+function MediaArtworkBadge({ item }: { item: MediaItem }) {
+  return (
+    <div className="pointer-events-none absolute bottom-3 left-3 inline-flex items-center rounded-full bg-slate-950/85 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
+      {item.mediaType}
+      {item.durationMs ? ` · ${formatDuration(item.durationMs)}` : ""}
+    </div>
+  );
+}
+
+function MediaArtworkPlaceholder({ item }: { item: MediaItem }) {
+  return (
+    <div className="flex h-44 w-full flex-col items-center justify-center rounded-xl bg-slate-100 px-4 text-center text-xs text-slate-500 dark:bg-slate-800">
+      <p className="font-medium text-slate-600 dark:text-slate-300">{item.mediaType === "VIDEO" ? "Video preview" : "Image preview"}</p>
+      <p className="mt-1">{item.status === "PROCESSING" ? "Processing thumbnail..." : "No thumbnail available yet."}</p>
+    </div>
+  );
+}
+
+function MediaImage({
+  src,
+  alt,
+  className,
+  fallbackSrc,
+  fallback
+}: {
+  src: string;
+  alt: string;
+  className: string;
+  fallbackSrc?: string | null;
+  fallback?: ReactNode;
+}) {
+  const [activeSrc, setActiveSrc] = useState(src);
+
+  useEffect(() => {
+    setActiveSrc(src);
+  }, [src]);
+
+  if (!activeSrc) {
+    return <>{fallback ?? null}</>;
+  }
+
+  return (
+    <img
+      src={activeSrc}
+      alt={alt}
+      className={className}
+      onError={() => {
+        if (fallbackSrc && activeSrc !== fallbackSrc) {
+          setActiveSrc(fallbackSrc);
+          return;
+        }
+
+        setActiveSrc("");
+      }}
+    />
+  );
 }
 
 function formatBytes(value: number): string {

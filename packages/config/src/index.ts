@@ -18,6 +18,7 @@ const apiEnvSchema = baseEnvSchema.extend({
   RATE_LIMIT_TTL: z.coerce.number().default(60),
   RATE_LIMIT_LIMIT: z.coerce.number().default(120),
   SIGNED_UPLOAD_EXPIRY_SECONDS: z.coerce.number().default(900),
+  SIGNED_MEDIA_URL_EXPIRY_SECONDS: z.coerce.number().default(3600),
   S3_ENDPOINT: z.string().min(1),
   S3_REGION: z.string().default("auto"),
   S3_ACCESS_KEY: z.string().min(1),

@@ -33,6 +33,8 @@ const createMediaService = () => {
       uploadedAt: null as Date | null,
       deletedAt: null as Date | null
     },
+    listItems: [] as Array<Record<string, unknown>>,
+    detailAsset: null as Record<string, unknown> | null,
     multipartParts: [] as Array<{ partNumber: number; etag: string }>,
     queueCalls: [] as Array<{ queueName: string; name: string; data: unknown; options: unknown }>,
     abortCalls: [] as Array<{ objectKey: string; uploadId: string }>,
@@ -46,16 +48,28 @@ const createMediaService = () => {
     mediaAsset: {
       findFirst: async (args: Record<string, unknown>) => {
         const where = args.where as Record<string, unknown> | undefined;
+        const include = args.include as Record<string, unknown> | undefined;
         if (where?.checksum) {
           return state.duplicateLookup;
         }
 
         if (where?.id === state.currentAsset.id && where?.workspaceId === state.currentAsset.workspaceId) {
+          if (include?.variants || include?.thumbnails || include?.tags) {
+            return (
+              state.detailAsset ?? {
+                ...state.currentAsset,
+                variants: [],
+                thumbnails: [],
+                tags: []
+              }
+            );
+          }
           return { ...state.currentAsset };
         }
 
         return null;
       },
+      findMany: async () => state.listItems.map((item) => ({ ...item })),
       create: async (args: Record<string, unknown>) => {
         const data = args.data as Record<string, unknown>;
         state.currentAsset = {
@@ -100,6 +114,7 @@ const createMediaService = () => {
     abortMultipartUpload: async (input: { objectKey: string; uploadId: string }) => {
       state.abortCalls.push(input);
     },
+    createSignedDownloadUrl: async (objectKey: string) => `https://signed.test/${objectKey}`,
     publicUrlForObject: (objectKey: string) => `https://cdn.test/${objectKey}`,
     objectExists: async () => true
   };
@@ -218,4 +233,95 @@ test("media service aborts multipart uploads and tombstones the pending asset", 
   ]);
   assert.equal(state.currentAsset.status, MediaStatus.DELETED);
   assert.ok(state.currentAsset.deletedAt instanceof Date);
+});
+
+test("media service signs thumbnail and source preview URLs for media listings", async () => {
+  const { service, state } = createMediaService();
+  state.listItems = [
+    {
+      ...state.currentAsset,
+      id: "image-1",
+      mediaType: MediaType.IMAGE,
+      status: MediaStatus.PROCESSING,
+      originalFilename: "draft-image.png",
+      mimeType: "image/png",
+      storageKey: "workspaces/workspace-1/media/draft-image.png",
+      thumbnails: [],
+      _count: {
+        draftSelections: 0
+      }
+    },
+    {
+      ...state.currentAsset,
+      id: "video-1",
+      mediaType: MediaType.VIDEO,
+      status: MediaStatus.READY,
+      originalFilename: "launch.mp4",
+      storageKey: "workspaces/workspace-1/media/launch.mp4",
+      thumbnails: [
+        {
+          id: "thumb-1",
+          storageKey: "workspaces/workspace-1/media/launch.mp4.thumb.jpg",
+          createdAt: new Date("2026-03-25T12:00:00.000Z")
+        }
+      ],
+      _count: {
+        draftSelections: 3
+      }
+    }
+  ];
+
+  const result = await service.listMedia("user-1", {
+    workspaceId: "workspace-1",
+    sort: "newest"
+  });
+
+  assert.equal(result.items.length, 2);
+  assert.equal(result.items[0]?.previewUrl, "https://signed.test/workspaces/workspace-1/media/draft-image.png");
+  assert.equal(result.items[0]?.thumbnail, null);
+  assert.equal(result.items[1]?.thumbnail, "https://signed.test/workspaces/workspace-1/media/launch.mp4.thumb.jpg");
+  assert.equal(result.items[1]?.previewUrl, "https://signed.test/workspaces/workspace-1/media/launch.mp4");
+});
+
+test("media service signs source, variant, and thumbnail URLs for media previews", async () => {
+  const { service, state } = createMediaService();
+  state.currentAsset.status = MediaStatus.PROCESSING;
+  state.currentAsset.mediaType = MediaType.IMAGE;
+  state.currentAsset.mimeType = "image/png";
+  state.currentAsset.storageKey = "workspaces/workspace-1/media/source-image.png";
+  state.detailAsset = {
+    ...state.currentAsset,
+    variants: [
+      {
+        id: "variant-1",
+        mediaAssetId: state.currentAsset.id,
+        variantKind: "original",
+        storageKey: "workspaces/workspace-1/media/source-image.png",
+        mimeType: "image/png",
+        sizeBytes: BigInt(2048),
+        width: 100,
+        height: 100,
+        durationMs: null,
+        codec: "png",
+        bitrate: null,
+        fps: null
+      }
+    ],
+    thumbnails: [
+      {
+        id: "thumb-1",
+        mediaAssetId: state.currentAsset.id,
+        storageKey: "workspaces/workspace-1/media/source-image.png.thumb.jpg",
+        width: 480,
+        height: 480
+      }
+    ],
+    tags: []
+  };
+
+  const result = await service.getMediaById("user-1", "media-1", "workspace-1");
+
+  assert.equal(result.sourceUrl, "https://signed.test/workspaces/workspace-1/media/source-image.png");
+  assert.equal(result.variants[0]?.publicUrl, "https://signed.test/workspaces/workspace-1/media/source-image.png");
+  assert.equal(result.thumbnails[0]?.publicUrl, "https://signed.test/workspaces/workspace-1/media/source-image.png.thumb.jpg");
 });
