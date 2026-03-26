@@ -1,0 +1,46 @@
+{
+  "name": "postport",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "sync:env": "node scripts/sync-env.mjs",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "dev": "pnpm sync:env && turbo run dev --parallel --filter=@postport/web --filter=@postport/api",
+    "dev:all": "pnpm sync:env && turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:e2e": "pnpm --filter @postport/web build && playwright test",
+    "test:e2e:headed": "pnpm --filter @postport/web build && playwright test --headed",
+    "test:e2e:ui": "pnpm --filter @postport/web build && playwright test --ui",
+    "format": "turbo run format",
+    "setup:local": "pnpm sync:env && pnpm infra:up && pnpm db:generate && pnpm db:migrate:dev && pnpm db:seed",
+    "setup:remote": "pnpm sync:env && pnpm db:generate && pnpm db:migrate:deploy && pnpm db:seed",
+    "db:generate": "pnpm sync:env && pnpm --filter @postport/api prisma:generate",
+    "db:migrate:dev": "pnpm sync:env && pnpm --filter @postport/api prisma:migrate:dev",
+    "db:migrate:deploy": "pnpm sync:env && pnpm --filter @postport/api prisma:migrate:deploy",
+    "db:seed": "pnpm sync:env && pnpm --filter @postport/api prisma:seed"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@parcel/watcher",
+      "@prisma/client",
+      "@prisma/engines",
+      "@swc/core",
+      "argon2",
+      "esbuild",
+      "msgpackr-extract",
+      "prisma",
+      "sharp"
+    ]
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "turbo": "^2.1.0",
+    "typescript": "^5.6.3"
+  }
+}

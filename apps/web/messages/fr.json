@@ -1,0 +1,13 @@
+{
+  "appName": "PostPort",
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "media": "Bibliothèque média",
+    "connections": "Connexions",
+    "settings": "Paramètres"
+  },
+  "auth": {
+    "loginTitle": "Bon retour",
+    "registerTitle": "Créer votre compte"
+  }
+}

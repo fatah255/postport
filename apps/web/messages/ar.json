@@ -1,0 +1,13 @@
+{
+  "appName": "بوست بورت",
+  "nav": {
+    "dashboard": "لوحة التحكم",
+    "media": "مكتبة الوسائط",
+    "connections": "الحسابات المتصلة",
+    "settings": "الإعدادات"
+  },
+  "auth": {
+    "loginTitle": "مرحباً بعودتك",
+    "registerTitle": "إنشاء حساب"
+  }
+}

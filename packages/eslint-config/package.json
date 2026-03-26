@@ -1,0 +1,17 @@
+{
+  "name": "@postport/eslint-config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./base.mjs",
+    "./next": "./next.mjs",
+    "./nest": "./nest.mjs"
+  },
+  "dependencies": {
+    "@eslint/js": "^9.12.0",
+    "@next/eslint-plugin-next": "^16.2.1",
+    "eslint-config-prettier": "^9.1.0",
+    "typescript-eslint": "^8.8.0"
+  }
+}

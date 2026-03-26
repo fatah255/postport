@@ -1,0 +1,36 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# turbo
+.turbo/
+
+# builds
+dist/
+build/
+.next/
+coverage/
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+pnpm-debug.log*
+.runtime/
+test-results/
+dump.rdb
+
+# prisma
+apps/api/prisma/dev.db
+apps/api/prisma/dev.db-journal
+
+# generated
+apps/api/src/generated/

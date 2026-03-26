@@ -1,0 +1,589 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Platform {
+  INSTAGRAM
+  FACEBOOK
+  TIKTOK
+}
+
+enum MediaType {
+  VIDEO
+  IMAGE
+  CAROUSEL
+}
+
+enum DraftStatus {
+  DRAFT
+  READY
+  SCHEDULED
+  PARTIALLY_PUBLISHED
+  PUBLISHED
+  FAILED
+  ARCHIVED
+}
+
+enum MediaStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+  DELETED
+}
+
+enum PublishJobStatus {
+  QUEUED
+  RUNNING
+  WAITING_REMOTE
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  NEEDS_REAUTH
+}
+
+enum AccountStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  PERMISSION_MISSING
+  MISCONFIGURED
+}
+
+enum PublishMode {
+  DIRECT
+  DRAFT_UPLOAD
+}
+
+enum LocaleCode {
+  EN
+  FR
+  AR
+}
+
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model User {
+  id               String       @id @default(uuid()) @db.Uuid
+  email            String       @unique
+  passwordHash     String
+  fullName         String
+  locale           LocaleCode   @default(EN)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  memberships      Membership[]
+  sessions         Session[]
+  auditLogs        AuditLog[]
+  createdWorkspaces Workspace[] @relation("WorkspaceOwner")
+  mediaAssets      MediaAsset[]
+  drafts           Draft[]      @relation("DraftAuthor")
+  notifications    Notification[]
+  apiKeys          ApiKey[]     @relation("ApiKeyCreator")
+}
+
+model Workspace {
+  id                 String             @id @default(uuid()) @db.Uuid
+  name               String
+  slug               String             @unique
+  ownerId            String             @db.Uuid
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  owner              User               @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  memberships        Membership[]
+  auditLogs          AuditLog[]
+  connectedAccounts  ConnectedAccount[]
+  mediaAssets        MediaAsset[]
+  mediaFolders       MediaFolder[]
+  mediaTags          MediaTag[]
+  drafts             Draft[]
+  publishJobs        PublishJob[]
+  webhookDeliveries  WebhookDelivery[]
+  notifications      Notification[]
+  apiKeys            ApiKey[]
+  idempotencyKeys    IdempotencyKey[]
+  featureFlags       FeatureFlag[]
+}
+
+model Membership {
+  id          String         @id @default(uuid()) @db.Uuid
+  workspaceId String         @db.Uuid
+  userId      String         @db.Uuid
+  role        MembershipRole @default(MEMBER)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Session {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @db.Uuid
+  tokenHash  String   @unique
+  ipAddress  String?
+  userAgent  String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model AuditLog {
+  id         String    @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  userId     String?   @db.Uuid
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  createdAt  DateTime  @default(now())
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+}
+
+model ConnectedAccount {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  workspaceId           String                   @db.Uuid
+  platform              Platform
+  status                AccountStatus            @default(ACTIVE)
+  displayName           String
+  remoteAccountId       String
+  scopeSummary          Json?
+  tokenExpiresAt        DateTime?
+  lastSuccessfulPublishAt DateTime?
+  lastError             String?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  workspace             Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  profiles              ConnectedPageOrProfile[]
+  oauthCredentials      OAuthCredential[]
+  capabilitySnapshots   PlatformCapabilitySnapshot[]
+  draftTargets          DraftPlatformTarget[]
+
+  @@unique([workspaceId, platform, remoteAccountId])
+  @@index([workspaceId, platform, status])
+}
+
+model ConnectedPageOrProfile {
+  id                    String                     @id @default(uuid()) @db.Uuid
+  connectedAccountId    String                     @db.Uuid
+  remoteId              String
+  status                AccountStatus              @default(ACTIVE)
+  name                  String
+  username              String?
+  avatarUrl             String?
+  isDefault             Boolean                    @default(false)
+  isEligible            Boolean                    @default(true)
+  capabilityFlags       Json?
+  publishModeAvailable  Json?
+  lastMetadataSyncAt    DateTime?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+  connectedAccount      ConnectedAccount           @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+  draftTargets          DraftPlatformTarget[]
+  capabilitySnapshots   PlatformCapabilitySnapshot[]
+
+  @@unique([connectedAccountId, remoteId])
+}
+
+model OAuthCredential {
+  id                String       @id @default(uuid()) @db.Uuid
+  connectedAccountId String      @db.Uuid
+  provider          Platform
+  externalUserId    String
+  scopesJson        Json?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  connectedAccount  ConnectedAccount @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+  tokenSecrets      TokenSecret[]
+
+  @@unique([connectedAccountId, provider, externalUserId])
+}
+
+model TokenSecret {
+  id               String         @id @default(uuid()) @db.Uuid
+  oauthCredentialId String        @db.Uuid
+  encryptedPayload String
+  iv               String
+  tag              String
+  expiresAt        DateTime?
+  refreshExpiresAt DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  oauthCredential  OAuthCredential @relation(fields: [oauthCredentialId], references: [id], onDelete: Cascade)
+
+  @@index([oauthCredentialId, expiresAt])
+}
+
+model MediaFolder {
+  id          String      @id @default(uuid()) @db.Uuid
+  workspaceId String      @db.Uuid
+  parentId    String?     @db.Uuid
+  name        String
+  path        String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parent      MediaFolder? @relation("MediaFolderTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    MediaFolder[] @relation("MediaFolderTree")
+  mediaAssets MediaAsset[]
+
+  @@unique([workspaceId, path])
+}
+
+model MediaTag {
+  id          String         @id @default(uuid()) @db.Uuid
+  workspaceId String         @db.Uuid
+  name        String
+  color       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  mediaAssets MediaAssetTag[]
+
+  @@unique([workspaceId, name])
+}
+
+model MediaAsset {
+  id                 String             @id @default(uuid()) @db.Uuid
+  workspaceId        String             @db.Uuid
+  ownerId            String             @db.Uuid
+  folderId           String?            @db.Uuid
+  mediaType          MediaType
+  status             MediaStatus        @default(UPLOADING)
+  originalFilename   String
+  normalizedFilename String
+  mimeType           String
+  fileExtension      String?
+  sizeBytes          BigInt
+  checksum           String
+  storageKey         String
+  sourceUploadId     String?
+  width              Int?
+  height             Int?
+  durationMs         Int?
+  codec              String?
+  bitrate            Int?
+  fps                Float?
+  ffprobeJson        Json?
+  uploadedAt         DateTime?
+  deletedAt          DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  workspace          Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner              User               @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  folder             MediaFolder?       @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  variants           MediaVariant[]
+  thumbnails         MediaThumbnail[]
+  draftSelections    DraftMediaSelection[]
+  tags               MediaAssetTag[]
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, checksum])
+}
+
+model MediaAssetTag {
+  mediaAssetId String    @db.Uuid
+  mediaTagId   String    @db.Uuid
+  createdAt    DateTime  @default(now())
+  mediaAsset   MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  mediaTag     MediaTag   @relation(fields: [mediaTagId], references: [id], onDelete: Cascade)
+
+  @@id([mediaAssetId, mediaTagId])
+}
+
+model MediaVariant {
+  id            String    @id @default(uuid()) @db.Uuid
+  mediaAssetId  String    @db.Uuid
+  variantKind   String
+  storageKey    String
+  mimeType      String
+  sizeBytes     BigInt
+  width         Int?
+  height        Int?
+  durationMs    Int?
+  codec         String?
+  bitrate       Int?
+  fps           Float?
+  createdAt     DateTime  @default(now())
+  mediaAsset    MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  thumbnails    MediaThumbnail[]
+
+  @@unique([mediaAssetId, variantKind])
+}
+
+model MediaThumbnail {
+  id            String      @id @default(uuid()) @db.Uuid
+  mediaAssetId  String      @db.Uuid
+  mediaVariantId String?    @db.Uuid
+  storageKey    String
+  width         Int
+  height        Int
+  createdAt     DateTime    @default(now())
+  mediaAsset    MediaAsset  @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  mediaVariant  MediaVariant? @relation(fields: [mediaVariantId], references: [id], onDelete: SetNull)
+}
+
+model Draft {
+  id               String               @id @default(uuid()) @db.Uuid
+  workspaceId      String               @db.Uuid
+  createdById      String               @db.Uuid
+  status           DraftStatus          @default(DRAFT)
+  title            String?
+  description      String?
+  caption          String?
+  canonicalPostJson Json?
+  scheduledAt      DateTime?
+  timezone         String?
+  archivedAt       DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  workspace        Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy        User                 @relation("DraftAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  platformTargets  DraftPlatformTarget[]
+  captionVariants  DraftCaptionVariant[]
+  mediaSelections  DraftMediaSelection[]
+  schedules        PublishSchedule[]
+  publishJobs      PublishJob[]
+
+  @@index([workspaceId, status, createdAt])
+}
+
+model DraftPlatformTarget {
+  id                       String                     @id @default(uuid()) @db.Uuid
+  draftId                  String                     @db.Uuid
+  connectedAccountId       String                     @db.Uuid
+  connectedPageOrProfileId String?                    @db.Uuid
+  capabilitySnapshotId     String?                    @db.Uuid
+  platform                 Platform
+  publishMode              PublishMode                @default(DIRECT)
+  platformSpecificJson     Json?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  draft                    Draft                      @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  connectedAccount         ConnectedAccount           @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+  connectedPageOrProfile   ConnectedPageOrProfile?    @relation(fields: [connectedPageOrProfileId], references: [id], onDelete: SetNull)
+  capabilitySnapshot       PlatformCapabilitySnapshot? @relation(fields: [capabilitySnapshotId], references: [id], onDelete: SetNull)
+  publishJobs              PublishJob[]
+
+  @@unique([draftId, platform, connectedAccountId])
+}
+
+model DraftCaptionVariant {
+  id          String      @id @default(uuid()) @db.Uuid
+  draftId     String      @db.Uuid
+  platform    Platform
+  locale      LocaleCode  @default(EN)
+  caption     String?
+  description String?
+  hashtags    Json?
+  mentions    Json?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  draft       Draft       @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@unique([draftId, platform, locale])
+}
+
+model DraftMediaSelection {
+  id          String     @id @default(uuid()) @db.Uuid
+  draftId     String     @db.Uuid
+  mediaAssetId String    @db.Uuid
+  orderIndex  Int        @default(0)
+  isCover     Boolean    @default(false)
+  createdAt   DateTime   @default(now())
+  draft       Draft      @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  mediaAsset  MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+
+  @@unique([draftId, mediaAssetId])
+}
+
+model PublishSchedule {
+  id          String      @id @default(uuid()) @db.Uuid
+  draftId     String      @db.Uuid
+  scheduledAt DateTime
+  timezone    String
+  isImmediate Boolean     @default(false)
+  cancelledAt DateTime?
+  lockedAt    DateTime?
+  lockOwner   String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  draft       Draft       @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  jobs        PublishJob[]
+
+  @@index([scheduledAt, cancelledAt])
+}
+
+model PublishJob {
+  id                 String             @id @default(uuid()) @db.Uuid
+  workspaceId        String             @db.Uuid
+  draftId            String             @db.Uuid
+  scheduleId         String?            @db.Uuid
+  platformTargetId   String?            @db.Uuid
+  platform           Platform
+  status             PublishJobStatus   @default(QUEUED)
+  priority           Int                @default(100)
+  runAt              DateTime
+  dedupeKey          String?
+  idempotencyKey     String             @unique
+  remotePublishId    String?
+  remoteUrl          String?
+  needsReauthReason  String?
+  lastErrorKind      String?
+  lastErrorCode      String?
+  lastErrorMessage   String?
+  attemptCount       Int                @default(0)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  workspace          Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  draft              Draft              @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  schedule           PublishSchedule?   @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  platformTarget     DraftPlatformTarget? @relation(fields: [platformTargetId], references: [id], onDelete: SetNull)
+  attempts           PublishAttempt[]
+  events             PublishEvent[]
+
+  @@index([workspaceId, status, runAt])
+  @@index([draftId])
+}
+
+model PublishAttempt {
+  id                      String          @id @default(uuid()) @db.Uuid
+  publishJobId            String          @db.Uuid
+  attemptNumber           Int
+  status                  PublishJobStatus
+  startedAt               DateTime        @default(now())
+  endedAt                 DateTime?
+  requestPayload          Json?
+  responsePayload         Json?
+  normalizedErrorKind     String?
+  normalizedErrorCode     String?
+  normalizedErrorMessage  String?
+  retryable               Boolean?
+  createdAt               DateTime        @default(now())
+  publishJob              PublishJob      @relation(fields: [publishJobId], references: [id], onDelete: Cascade)
+  events                  PublishEvent[]
+
+  @@unique([publishJobId, attemptNumber])
+}
+
+model PublishEvent {
+  id               String          @id @default(uuid()) @db.Uuid
+  publishJobId     String          @db.Uuid
+  publishAttemptId String?         @db.Uuid
+  eventType        String
+  message          String?
+  payload          Json?
+  createdAt        DateTime        @default(now())
+  publishJob       PublishJob      @relation(fields: [publishJobId], references: [id], onDelete: Cascade)
+  publishAttempt   PublishAttempt? @relation(fields: [publishAttemptId], references: [id], onDelete: SetNull)
+
+  @@index([publishJobId, createdAt])
+}
+
+model PlatformCapabilitySnapshot {
+  id                     String                   @id @default(uuid()) @db.Uuid
+  platform               Platform
+  connectedAccountId     String?                  @db.Uuid
+  connectedPageOrProfileId String?                @db.Uuid
+  targetExternalId       String?
+  flagsJson              Json
+  rawJson                Json?
+  capturedAt             DateTime                 @default(now())
+  connectedAccount       ConnectedAccount?        @relation(fields: [connectedAccountId], references: [id], onDelete: SetNull)
+  connectedPageOrProfile ConnectedPageOrProfile?  @relation(fields: [connectedPageOrProfileId], references: [id], onDelete: SetNull)
+  draftPlatformTargets   DraftPlatformTarget[]
+
+  @@index([platform, capturedAt])
+}
+
+model WebhookDelivery {
+  id            String      @id @default(uuid()) @db.Uuid
+  workspaceId   String      @db.Uuid
+  platform      Platform
+  endpoint      String
+  eventType     String
+  payload       Json
+  status        String
+  attemptCount  Int         @default(0)
+  lastAttemptAt DateTime?
+  nextAttemptAt DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  workspace     Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, platform, status])
+}
+
+model Notification {
+  id          String     @id @default(uuid()) @db.Uuid
+  workspaceId String     @db.Uuid
+  userId      String     @db.Uuid
+  type        String
+  title       String
+  body        String
+  metadata    Json?
+  readAt      DateTime?
+  createdAt   DateTime   @default(now())
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId, readAt])
+}
+
+model ApiKey {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  createdById String    @db.Uuid
+  label       String
+  keyHash     String    @unique
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation("ApiKeyCreator", fields: [createdById], references: [id], onDelete: Restrict)
+}
+
+model IdempotencyKey {
+  id           String    @id @default(uuid()) @db.Uuid
+  workspaceId  String    @db.Uuid
+  key          String
+  requestHash  String
+  responseCode Int?
+  responseBody Json?
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, key])
+}
+
+model FeatureFlag {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  key         String
+  enabled     Boolean   @default(false)
+  configJson  Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, key])
+}
